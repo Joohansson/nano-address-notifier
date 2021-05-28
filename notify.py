@@ -208,7 +208,7 @@ async def emailer():
             if len(emailBuffer) > 0 and int(time.time()) > lastEmail + emailBufferLength:
                 body = ''
                 for text in emailBuffer:
-                    body = body + text + '<br><br>'
+                    body = body + str(datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')) + " (UTC): " + text + '<br><br>'
                 body = body + '<strong>Total Amounts: </strong>SENT: ' + format_float(emailBufferAmounts['send']) + ' | RECEIVED: ' + format_float(emailBufferAmounts['receive'])
                 
                 # reset buffers
