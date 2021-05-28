@@ -7,6 +7,7 @@ Track accounts and notify via log file or email
     pip3 install simplejson
     pip3 install websockets
     pip3 install asyncio
+    pip3 install numpy
 
 ## Config
 
@@ -21,3 +22,10 @@ Track accounts and notify via log file or email
     python3 notify.py
 
 Or set up a service
+
+## Set up sendgrid
+
+* Go to [sendgrid.com](https://sendgrid.com/) and set up a free account
+* Verify a single send address or domain from settings => Sender Authentication. Set as sender address in the python file
+* Generate an API key from settings => API Keys. Paste that into the python file
+* That's it!

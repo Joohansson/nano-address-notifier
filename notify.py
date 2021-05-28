@@ -10,6 +10,7 @@ import websockets
 import datetime
 import asyncio
 import time
+import numpy as np
 from pathlib import Path
 
 # CONFIG THESE
@@ -27,7 +28,7 @@ emailBufferLength = 3600
 minAmount = 0.0000001
 
 # Set to True if tracking thousands of accounts, or subscription will fail. Subscribing to all will still work
-# but increases the web traffic for both client and server
+# but increases the web traffic for both client and server. However NOT available on socket.nanos.cc.
 subscribeAll = False
 
 # INPUT AND OUTPUT
@@ -44,6 +45,7 @@ statData = []
 accounts = {'account':{}}
 accountsIds = []
 emailBuffer = []
+emailBufferAmounts = {'send': 0, 'receive': 0}
 lastEmail = 0
 nano = 1000000000000000000000000000000
 
@@ -53,6 +55,9 @@ def timeLog(msg):
 emails = []
 for address in toEmails:
     emails.append(To(address))
+
+def format_float(num):
+    return np.format_float_positional(num, trim='-')
 
 def sendMail(body):
     message = Mail(
@@ -97,9 +102,10 @@ async def connectWebsocket(init = True):
     global accounts
     global accountsIds
     global emailBuffer
+    global emailBufferAmounts
 
     if init:
-      trackAccounts()
+        trackAccounts()
 
     # Predefined subscription message
     msg = {
@@ -128,45 +134,59 @@ async def connectWebsocket(init = True):
                         amount = '0'
                         okAmount = False
                         okBlock = False
+                        href = '<a href="https://nanolooker.com/account/'
+
                         if int(message['amount']) > 0:
-                            amount = str(int(message['amount']) / nano)
+                            amount = format_float(int(message['amount']) / nano)
                             if float(amount) >= minAmount:
                                 okAmount = True
 
                         ## send, receive or change block
                         if message['block']['account'] in accountsIds:
                             account = message['account']
-                            text = 'Account ' + accounts[account]['alias'] + ' (' + account + ')'
+                            textLog = 'Account ' + accounts[account]['alias'] + ' (' + account + ')'
+                            text = 'Account <strong>' + accounts[account]['alias'] + '</strong> (' + href + account + '">' + account + '</a>)'
+                            
                             # send block
                             if message['block']['subtype'] == 'send':
-                                text = text + ' sent ' + amount + ' NANO to ' + message['block']['link_as_account']
+                                text = text + ' sent ' + amount + ' NANO to ' + href + message['block']['link_as_account'] + '">' + message['block']['link_as_account'] + '</a>'
+                                textLog = textLog + ' sent ' + amount + ' NANO to ' + message['block']['link_as_account']
                                 okBlock = True
+                                emailBufferAmounts['send'] = emailBufferAmounts['send'] + float(amount)
                             # receive block
                             elif message['block']['subtype'] == 'receive':
-                                text = text + ' received ' + amount + ' NANO'
+                                add = ' received ' + amount + ' NANO'
+                                text = text + add
+                                textLog = textLog + add
                                 okBlock = True
+                                emailBufferAmounts['receive'] = emailBufferAmounts['receive'] + float(amount)
                             # change block
                             elif message['block']['subtype'] == 'change':
-                                text = text + ' changed rep to ' + message['block']['representative']
+                                text = text + ' changed rep to ' + href + message['block']['representative'] + '">' + message['block']['representative'] + '</a>'
+                                textLog = textLog + ' changed rep to ' + message['block']['representative']
                                 okAmount = True
                                 okBlock = True
 
                         ## incoming block
                         elif message['block']['link_as_account'] in accounts:
                             account = message['block']['link_as_account']
-                            text = 'Account ' + accounts[account]['alias'] + ' (' + account + ')'
+                            textLog = 'Account ' + accounts[account]['alias'] + ' (' + account + ')'
+                            text = 'Account <strong>' + accounts[account]['alias'] + '</strong> (' + href + account + '">' + account + '</a>)'
                             # incoming block
                             if message['block']['subtype'] == 'send':
-                                text = text + ' got incoming ' + amount + ' NANO from ' + message['block']['account']
+                                text = text + ' got incoming ' + amount + ' NANO from ' + href + message['block']['account'] + '">' + message['block']['account'] + '</a>'
+                                textLog = textLog + ' got incoming ' + amount + ' NANO from ' + message['block']['account']
                                 okBlock = True
 
                         if okBlock and okAmount:
-                            log.info(timeLog(text))
+                            log.info(timeLog(textLog))
                             emailBuffer.append(text)
 
                 except Exception as e:
                     log.error(timeLog('Error: %r' %e))
                     await asyncio.sleep(5)
+                    break
+            await connectWebsocket(False)
 
     except Exception as e:
         log.error(timeLog('Websocket connection error. Error: %r' %e))
@@ -177,6 +197,7 @@ async def connectWebsocket(init = True):
 async def emailer():
     global emailBuffer
     global lastEmail
+    global emailBufferAmounts
 
     if not enableEmail:
         return
@@ -187,8 +208,12 @@ async def emailer():
             if len(emailBuffer) > 0 and int(time.time()) > lastEmail + emailBufferLength:
                 body = ''
                 for text in emailBuffer:
-                    body = body + text + '<br>'
-                emailBuffer = [] # reset buffer
+                    body = body + text + '<br><br>'
+                body = body + '<strong>Total Amounts: </strong>SENT: ' + format_float(emailBufferAmounts['send']) + ' | RECEIVED: ' + format_float(emailBufferAmounts['receive'])
+                
+                # reset buffers
+                emailBuffer = []
+                emailBufferAmounts = {'send': 0, 'receive': 0}
                 log.info(timeLog('Sending email'))
                 sendMail(body)
                 lastEmail = int(time.time())
